@@ -102,6 +102,12 @@ const upload = multer({
 const sessions = new Map();
 const sessionKey = (uid) => `interview:${uid}`;
 
+const starterQuestions = [
+  "Tell me about yourself.",
+  "What are your strengths related to this role?",
+  "Why are you interested in this role?"
+];
+
 function extractQuestionCount(text) {
   const lower = (text || "").toLowerCase();
   const match = lower.match(/(\d+)\s*(question|questions)/);
@@ -150,7 +156,7 @@ app.post(
         resumeText,
         transcript: [],
         questionCount: 0,
-        maxQuestions: 8,
+        maxQuestions: 5,
         mode: "chat",
         startedAt: Date.now(),
       });
@@ -166,7 +172,7 @@ Respond ONLY in valid JSON format:
 Rules:
 - greet the candidate warmly
 - say you can help with interview preparation
-- mention you can start a mock interview when the user asks
+- mention they can start a mock interview when the user asks
 - do NOT ask interview questions yet`,
         `
 Candidate Name: ${name}
@@ -304,32 +310,7 @@ ${userText}
       session.mode = "interview";
       session.questionCount = 1;
 
-      const data = await generateJson(
-        `You are a mock interviewer.
-
-Respond ONLY JSON:
-{
-  "question": "text"
-}
-
-Rules:
-- ask exactly one first interview question
-- base it on the candidate role, strength, and resume
-- do not give feedback yet
-- keep it clear and professional`,
-        `
-Candidate Name: ${session.name}
-Candidate Role: ${session.profession}
-Candidate Strength: ${session.strength}
-
-Resume:
-${session.resumeText.slice(0, 8000)}
-`
-      );
-
-      const firstQuestion =
-        data.question ||
-        "Tell me about yourself and your experience related to this role.";
+      const firstQuestion = starterQuestions[0];
 
       session.transcript.push({
         role: "ai",
@@ -358,6 +339,28 @@ ${session.resumeText.slice(0, 8000)}
       });
     }
 
+    // First 3 fixed starter questions
+    if (session.questionCount < 3) {
+      const nextQuestion = starterQuestions[session.questionCount];
+
+      session.questionCount++;
+
+      session.transcript.push({
+        role: "ai",
+        content: nextQuestion,
+      });
+
+      return res.json({
+        ok: true,
+        feedback: "Good. Let's continue.",
+        nextQuestion,
+        questionCount: session.questionCount,
+        maxQuestions: session.maxQuestions,
+        done: false,
+        mode: "interview",
+      });
+    }
+
     const data = await generateJson(
       `You are an AI mock interviewer.
 
@@ -372,11 +375,19 @@ Rules:
 - feedback short and encouraging
 - ask ONE next interview question
 - never repeat earlier questions
-- base questions on the role, resume, and previous answers
+- after the first 3 standard introductory questions, continue with dynamic questions
+- base questions on the role, resume, strengths, and previous answers
+- keep questions clear and professional
 - if interview should end, set "done" to true and "next_question" to null`,
       `
+Candidate name: ${session.name}
 Candidate role: ${session.profession}
 Candidate strength: ${session.strength}
+
+First 3 fixed questions already asked:
+1. Tell me about yourself.
+2. What are your strengths related to this role?
+3. Why are you interested in this role?
 
 Resume:
 ${session.resumeText.slice(0, 8000)}
